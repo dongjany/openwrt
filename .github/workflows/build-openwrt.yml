@@ -1,19 +1,6 @@
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-#
-# File: .github/workflows/openwrt-bulder.yml
-# Description: Build OpenWrt using GitHub Actions
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-
 name: OpenWrt Builder
 
 on:
-  repository_dispatch:
   workflow_dispatch:
     inputs:
       repo:
@@ -33,15 +20,17 @@ on:
         type: choice
         options:
           - 'master'
+          - '23.05'
           - '24.10'
           - '25.12'
+          - 'openwrt-23.05'
           - 'openwrt-24.10'
           - 'openwrt-25.12'
              
 env:
   # 动态引用 workflow_dispatch 的输入参数
-  REPO_URL: https://github.com/${{ github.event.inputs.repo || 'openwrt/openwrt' }}
-  REPO_BRANCH: ${{ github.event.inputs.branch || 'openwrt-24.10' }}
+  REPO_URL: https://github.com/${{ github.event.inputs.repo }}
+  REPO_BRANCH: ${{ github.event.inputs.branch }}
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   ENABLE_SSH: true
@@ -72,7 +61,6 @@ jobs:
         sudo sed -i 's/azure\.//' /etc/apt/sources.list
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        # 安装 tmate 依赖（用于 SSH 连接）
         sudo -E apt-get -qq install tmate
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
@@ -111,7 +99,7 @@ jobs:
       id: check_config
       run: |
         # 设置超时时间（单位：分钟），可根据需要调整
-        TIMEOUT=30
+        TIMEOUT=15
         INTERVAL=60  # 检测间隔 60 秒 = 1 分钟
         ELAPSED=0
 
@@ -166,16 +154,10 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
-        rm -rf packages feeds.buildinfo version.buildinfo sha256sums profiles.json *.sha *.manifest
+        cp $(realpath ../../../../.config) ./config.txt
+        rm -rf packages config.buildinfo feeds.buildinfo version.buildinfo sha256sums profiles.json *.sha *.manifest
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware directory
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
 
     - name: Generate release tag
       id: tag
