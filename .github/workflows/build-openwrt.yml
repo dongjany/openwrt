@@ -37,12 +37,13 @@ on:
           - '25.12'
           - 'openwrt-24.10'
           - 'openwrt-25.12'
-      enable_ssh:
-        description: '是否开启 SSH 连接（用于调试）'
+      description: '是否开启 SSH 连接（用于调试）'
         required: true
-        default: 'false'
-        type: boolean
-
+        default: '关闭'  # 改为中文默认值，对应false
+        type: choice     # 从boolean改为choice
+        options:         # 新增下拉选项
+          - '关闭'       # 对应false
+          - '开启'       # 对应true
 env:
   # 动态引用 workflow_dispatch 的输入参数
   REPO_URL: https://github.com/${{ github.event.inputs.repo || 'openwrt/openwrt' }}
@@ -51,7 +52,7 @@ env:
   UPLOAD_RELEASE: true
   UPLOAD_GOFILE: false
   TZ: Asia/Shanghai
-
+  ENABLE_SSH: ${{ github.event.inputs.enable_ssh == '开启' || false }}
 
 jobs:
   build:
