@@ -90,9 +90,7 @@ jobs:
         sleep 5  # 等待 tmate 启动
         # 获取 SSH 连接信息并输出
         TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-        TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
         echo "📌 SSH 连接地址：$TMATE_SSH"
-        echo "🌐 Web 终端地址：$TMATE_WEB"
         echo "⚠️  SSH 连接将在工作流结束后关闭，建议仅用于调试！"
 
     - name: Polling check .config file
@@ -154,7 +152,6 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
-        cp $(realpath ../../../../.config) ./config.txt
         rm -rf packages config.buildinfo feeds.buildinfo version.buildinfo sha256sums profiles.json *.sha *.manifest
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
@@ -169,7 +166,7 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
-      uses: softprops/action-gh-release@v2.1.0
+      uses: softprops/action-gh-release@master
       if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
