@@ -37,20 +37,14 @@ on:
           - '25.12'
           - 'openwrt-24.10'
           - 'openwrt-25.12'
-        description: '是否开启 SSH 连接（用于调试）'
-        required: true
-        default: 'true'
-        type: choice     
-        options:         
-          - 'false'      
-          - 'false'       
+             
 env:
   # 动态引用 workflow_dispatch 的输入参数
   REPO_URL: https://github.com/${{ github.event.inputs.repo || 'openwrt/openwrt' }}
   REPO_BRANCH: ${{ github.event.inputs.branch || 'openwrt-24.10' }}
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
-  UPLOAD_GOFILE: false
+  ENABLE_SSH: true
   TZ: Asia/Shanghai
 
 jobs:
@@ -112,9 +106,6 @@ jobs:
         echo "📌 SSH 连接地址：$TMATE_SSH"
         echo "🌐 Web 终端地址：$TMATE_WEB"
         echo "⚠️  SSH 连接将在工作流结束后关闭，建议仅用于调试！"
-        # 将连接信息写入环境变量（可选，方便后续步骤引用）
-        echo "TMATE_SSH=$TMATE_SSH" >> $GITHUB_ENV
-        echo "TMATE_WEB=$TMATE_WEB" >> $GITHUB_ENV
 
     - name: Polling check .config file
       id: check_config
