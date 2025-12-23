@@ -37,6 +37,11 @@ on:
           - '25.12'
           - 'openwrt-24.10'
           - 'openwrt-25.12'
+      enable_ssh:
+        description: '是否开启 SSH 连接（用于调试）'
+        required: true
+        default: 'false'
+        type: boolean
 
 env:
   # 动态引用 workflow_dispatch 的输入参数
@@ -44,6 +49,7 @@ env:
   REPO_BRANCH: ${{ github.event.inputs.branch || 'openwrt-24.10' }}
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
+  UPLOAD_GOFILE: false
   TZ: Asia/Shanghai
 
 
@@ -72,6 +78,8 @@ jobs:
         sudo sed -i 's/azure\.//' /etc/apt/sources.list
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+        # 安装 tmate 依赖（用于 SSH 连接）
+        sudo -E apt-get -qq install tmate
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -82,7 +90,7 @@ jobs:
       working-directory: /workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        git clone $REPO_URL -b $REPO_BRANCH openwrt --depth=1  # 浅克隆加速，减少磁盘占用
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: Update feeds
@@ -91,8 +99,22 @@ jobs:
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
 
-    - name: Setup Debug Session
-      uses: csexton/debugger-action@master
+    - name: Start SSH service (non-blocking)
+      if: env.ENABLE_SSH == 'true'
+      run: |
+        echo "🔑 正在启动 SSH 服务，连接信息将输出到日志中..."
+        # 后台启动 tmate，将 SSH 信息写入文件并实时输出到日志
+        nohup tmate -S /tmp/tmate.sock new-session -d &
+        sleep 5  # 等待 tmate 启动
+        # 获取 SSH 连接信息并输出
+        TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+        TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
+        echo "📌 SSH 连接地址：$TMATE_SSH"
+        echo "🌐 Web 终端地址：$TMATE_WEB"
+        echo "⚠️  SSH 连接将在工作流结束后关闭，建议仅用于调试！"
+        # 将连接信息写入环境变量（可选，方便后续步骤引用）
+        echo "TMATE_SSH=$TMATE_SSH" >> $GITHUB_ENV
+        echo "TMATE_WEB=$TMATE_WEB" >> $GITHUB_ENV
 
     - name: Polling check .config file
       id: check_config
@@ -124,7 +146,7 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        make download -j8
+        make download -j$(nproc)  # 使用 nproc 适配 CPU 核心数，比固定 -j8 更高效
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
@@ -141,7 +163,7 @@ jobs:
         fi
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV || echo "DEVICE_NAME=_unknown" >> $GITHUB_ENV  # 容错，避免空值
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Check space usage
@@ -197,9 +219,3 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Send msg to Wechat
-      env:
-        SENDKEY: ${{ secrets.SENDKEY }}
-        TAG: ${{ steps.tag.outputs.release_tag }}
-      run: curl -d "text=OpenWrt编译结束&desp=https://github.com/${GITHUB_REPOSITORY}/releases/${TAG}" https://sctapi.ftqq.com/${SENDKEY}.send
