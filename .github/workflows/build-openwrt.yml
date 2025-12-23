@@ -63,9 +63,6 @@ jobs:
         docker-images: true
         swap-storage: true
 
-    - name: Checkout
-      uses: actions/checkout@main
-
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -94,9 +91,8 @@ jobs:
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
 
-    - uses: actions/checkout@v4
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
+    - name: Setup Debug Session
+      uses: csexton/debugger-action@master
 
     - name: Polling check .config file
       id: check_config
