@@ -44,7 +44,6 @@ env:
   REPO_BRANCH: ${{ github.event.inputs.branch || 'openwrt-24.10' }}
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
-  capture_stdout: true
   TZ: Asia/Shanghai
 
 
@@ -95,14 +94,9 @@ jobs:
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
 
-    - name: 执行远程 SSH 命令（密码认证）
-      uses: appleboy/ssh-action@v1
-      with:
-        host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}
-        password: ${{ secrets.PASSWORD }}
-        port: ${{ secrets.PORT }}
-        script: whoami
+    - uses: actions/checkout@v4
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
 
     - name: Polling check .config file
       id: check_config
