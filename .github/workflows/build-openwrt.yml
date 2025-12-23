@@ -37,7 +37,7 @@ on:
           - '25.12'
           - 'openwrt-24.10'
           - 'openwrt-25.12'
-      description: '是否开启 SSH 连接（用于调试）'
+        description: '是否开启 SSH 连接（用于调试）'
         required: true
         default: 'true'
         type: choice     
