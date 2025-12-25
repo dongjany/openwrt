@@ -13,6 +13,8 @@ inputs:
 env:
   REPO_URL=https://github.com/openwrt/openwrt
   REPO_BRANCH=openwrt-24.10
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
 
 jobs:
