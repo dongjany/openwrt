@@ -2,38 +2,17 @@ name: OpenWrt Builder
 
 on:
   workflow_dispatch:
-    inputs:
-      repo:
-        description: '选择编译的源码仓库'
-        required: true
-        default: 'openwrt/openwrt'
-        type: choice
-        options:
-          - 'openwrt/openwrt'
-          - 'Lienol/openwrt'
-          - 'coolsnowwolf/lede'
-          - 'immortalwrt/immortalwrt'
-      branch:
-        description: '选择编译的源码分支'
-        required: true
-        default: 'openwrt-24.10'
-        type: choice
-        options:
-          - 'master'
-          - '23.05'
-          - '24.10'
-          - '25.12'
-          - 'openwrt-23.05'
-          - 'openwrt-24.10'
-          - 'openwrt-25.12'
+
+inputs:
+      OP_IP:
+        description: '静态IP地址'     
+        required: false
+        default: '192.168.2.15' 
+        type: string
              
 env:
-  # 动态引用 workflow_dispatch 的输入参数
-  REPO_URL: https://github.com/${{ github.event.inputs.repo }}
-  REPO_BRANCH: ${{ github.event.inputs.branch }}
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
-  ENABLE_SSH: true
+  REPO_URL=https://github.com/openwrt/openwrt
+  REPO_BRANCH=openwrt-24.10
   TZ: Asia/Shanghai
 
 jobs:
@@ -42,7 +21,7 @@ jobs:
 
     steps:
     - name: 释放磁盘空间
-      uses: jlumbroso/free-disk-space@main
+      uses: coder-xiaomo/free-disk-space@main
       with:
         tool-cache: false
         android: true
@@ -52,195 +31,129 @@ jobs:
         docker-images: true
         swap-storage: true
 
-    - name: Initialization environment
+    - name: 编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
-        sudo sed -i 's/azure\.//' /etc/apt/sources.list
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        sudo -E apt-get -qq install tmate
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
+        sudo apt-get update
+        sudo apt-get install -y tar img2simg build-essential flex bison cmake g++ gawk gcc-multilib g++-multilib gettext git libfuse-dev libncurses5-dev libssl-dev python3 python3-pip python3-ply python3-distutils python3-pyelftools rsync unzip zlib1g-dev file wget subversion patch upx-ucl autoconf automake curl asciidoc binutils bzip2 lib32gcc-s1 libc6-dev-i386 uglifyjs msmtp texinfo libreadline-dev libglib2.0-dev xmlto libelf-dev libtool autopoint antlr3 gperf ccache swig coreutils haveged scons libpython3-dev rename qemu-utils
+        sudo apt-get clean
+        git config --global user.name 'GitHub Actions' && git config --global user.email 'noreply@github.com'
+        sudo timedatectl set-timezone 'Asia/Shanghai'
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+        df -Th
 
-    - name: Clone source code
+    - name: 设置环境变量
+      run: |
+        TAG="$(date +'%Y%m%d')-$(openssl rand -hex 3)"
+        echo "tag=$TAG" >> $GITHUB_ENV
+        echo "REPO_URL=https://github.com/openwrt/openwrt" >> $GITHUB_ENV
+        echo "REPO_BRANCH=openwrt-24.10" >> $GITHUB_ENV
+        echo "OP_IP=${{ github.event.inputs.OP_IP }}" >> $GITHUB_ENV
+        
+    - name: 克隆源代码
       working-directory: /workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        git clone $REPO_URL openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: Update feeds
+    - name: 切换分支
+      working-directory: ./openwrt
+      id: var
+      run: |
+        case $REPO_BRANCH in
+          openwrt-24.10)
+            _release_tag=$(git tag --sort=taggerdate --list 'v24.*' | tail -1)
+            git checkout $_release_tag
+            _prerelease=false
+            ;;
+          *)
+            echo "Can't get local/upstream's branch/tags"
+            ;;
+        esac
+        echo "release_tag=$_release_tag" >> $GITHUB_ENV
+
+    - name: 更新软件包
       run: cd openwrt && ./scripts/feeds update -a
 
-    - name: Install feeds
+    - name: 下载软件包
       run: cd openwrt && ./scripts/feeds install -a
 
-    - name: Start SSH service (non-blocking)
-      if: env.ENABLE_SSH == 'true'
+    - name: SSH连接
       run: |
-        echo "🔑 正在启动 SSH 服务，连接信息将输出到日志中..."
-        # 后台启动 tmate，将 SSH 信息写入文件并实时输出到日志
         nohup tmate -S /tmp/tmate.sock new-session -d &
-        sleep 5  # 等待 tmate 启动
-        # 获取 SSH 连接信息并输出
+        sleep 5
         TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-        echo "📌 SSH 连接地址：$TMATE_SSH"
-        echo "⚠️  SSH 连接将在工作流结束后关闭，建议仅用于调试！"
+        echo "SSH 连接地址：$TMATE_SSH"
 
-    - name: Polling check .config file
+    - name: 检查.config文件
       id: check_config
       run: |
-        # 设置超时时间（单位：分钟），可根据需要调整
-        TIMEOUT=15
-        INTERVAL=60  # 检测间隔 60 秒 = 1 分钟
         ELAPSED=0
-
-        echo "开始轮询检测 openwrt/.config 文件，间隔 1 分钟，超时时间 $TIMEOUT 分钟"
-        while [ $ELAPSED -lt $((TIMEOUT * 60)) ]; do
-          if [ -f "openwrt/.config" ]; then
-            echo "✅ 检测到 openwrt/.config 文件，开始后续步骤"
-            echo "config_exists=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          echo "⏳ 未检测到 .config 文件，已等待 $((ELAPSED/60)) 分钟，1 分钟后重试..."
-          sleep $INTERVAL
-          ELAPSED=$((ELAPSED + INTERVAL))
+        while [ $ELAPSED -lt 900 ]; do
+          [ -f "openwrt/.config" ] && { echo "config_exists=true" >> $GITHUB_OUTPUT; exit 0; }
+          ELAPSED=$((ELAPSED + 60))
+          sleep 60
         done
-
-        # 超时后终止流程
-        echo "❌ 超时 $TIMEOUT 分钟仍未检测到 .config 文件，终止任务"
         echo "config_exists=false" >> $GITHUB_OUTPUT
         exit 1
 
-    - name: Download package
+    - name: 下载编译依赖
       id: package
       run: |
         cd openwrt
         make defconfig
-        make download -j$(nproc)  # 使用 nproc 适配 CPU 核心数，比固定 -j8 更高效
+        make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
-
-    - name: Compile the firmware
+    
+    - name: 编译源码
       id: compile
       run: |
-        set -e
         cd openwrt
         echo -e "$(nproc) thread compile"
-        echo "status=failed" >> $GITHUB_OUTPUT
-        if ! ( make -j$(nproc) || make -j1 || make -j1 V=s ); then
-            echo "❌ Make failed"
-            exit 1
-        fi
+        make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV || echo "DEVICE_NAME=_unknown" >> $GITHUB_ENV  # 容错，避免空值
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: 生成直刷包
-      if: steps.compile.outputs.status == 'success'
-      run: |
-        sudo apt install img2simg
-        ver="v0.3.2"
-        curl -L -o ./AmlImg https://github.com/rmoyulong/AmlImg/releases/download/$ver/AmlImg_${ver}_linux_amd64
-        chmod +x ./AmlImg
-        curl -L -o ./uboot.img https://github.com/rmoyulong/u-boot-onecloud/releases/download/Onecloud_Uboot_23.12.24_18.15.09/eMMC.burn.img
-        ./AmlImg unpack ./uboot.img burn/
-
-        gunzip openwrt/bin/targets/*/*/*.gz
-        diskimg=$(ls openwrt/bin/targets/*/*/*.img)
-        loop=$(sudo losetup --find --show --partscan $diskimg)
-        img_ext="openwrt.img"
-        img_mnt="xd"
-        rootfs_mnt="img"
-        boot_img=${img_ext}
-        boot_img_mnt=${img_mnt}
-        rootfs_img_mnt=${rootfs_mnt}
-        echo ${boot_img}
-        echo ${boot_img_mnt}
-        echo ${rootfs_img_mnt}
-        sudo rm -rf ${boot_img}
-        sudo rm -rf ${boot_img_mnt}
-        sudo rm -rf ${rootfs_img_mnt}
-        sudo dd if=/dev/zero of=${boot_img} bs=1M count=2000
-        sudo mkfs.ext4 ${boot_img}
-        sudo mkdir ${boot_img_mnt}
-        sudo mkdir ${rootfs_img_mnt}
-        sudo mount ${boot_img} ${boot_img_mnt}
-        sudo mount ${loop}p2 ${rootfs_img_mnt}
-        cd ${rootfs_img_mnt}
-        sudo cp -r * ../${boot_img_mnt}
-        cd ..
-        sudo sync
-        sudo umount ${boot_img_mnt}
-        sudo umount ${rootfs_img_mnt}
-        sudo img2simg ${loop}p1 burn/boot.simg
-        sudo img2simg openwrt.img burn/rootfs.simg
-        sudo rm -rf *.img
-        sudo losetup -d $loop
-        cat <<EOF >>burn/commands.txt
-        PARTITION:boot:sparse:boot.simg
-        PARTITION:rootfs:sparse:rootfs.simg
-        EOF
-        prefix=$(ls openwrt/bin/targets/*/*/*.img | sed 's/\.img$//')
-        burnimg=${prefix}.burn.img
-        ./AmlImg pack $burnimg burn/
-        for f in openwrt/bin/targets/*/*/*.burn.img; do
-          sha256sum "$f" >"${f}.sha"
-          xz -9 --threads=0 --compress "$f"
-        done
-        sudo rm -rf openwrt/bin/targets/*/*/*.img
-        sudo rm -rf openwrt/bin/targets/*/*/*.gz
-
-    - name: Check space usage
+    - name: 查看磁盘使用情况
       if: (!cancelled())
       run: df -hT
   
-    - name: Organize files
+    - name: 整理文件
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
+        mv -f openwrt/.config openwrt/bin/targets/*/*/config.txt
         cd openwrt/bin/targets/*/*
-        rm -rf packages config.buildinfo feeds.buildinfo version.buildinfo sha256sums profiles.json *.sha *.manifest
+        rm -rf packages
+        rm -rf *.buildinfo
+        rm -rf profiles.json
+        rm -rf *.manifest
+        rm -rf *.sha
+        rm -rf sha256sums
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: Generate release tag
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware to release
-      uses: softprops/action-gh-release@master
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+    - name: 上传固件到Releases
+      uses: softprops/action-gh-release@v2.1.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
+        tag_name: ${{ env.release_tag }}-${{env.tag}}
         files: ${{ env.FIRMWARE }}/*
+        body: |
+          ====================固件信息=======================
+           源码：${{ env.REPO_URL }}
+           分支：${{ env.release_tag }}
+           静态IP：${{ github.event.inputs.OP_IP }}
 
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@main
+    - name: 清理Releases
+      uses: dev-drprasad/delete-older-releases@v0.3.4
       with:
-        retain_days: 0
-        keep_minimum_runs: 2
-
-    - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@master
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      with:
-        keep_latest: 3
+        keep_latest: 1
         delete_tags: true
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   
